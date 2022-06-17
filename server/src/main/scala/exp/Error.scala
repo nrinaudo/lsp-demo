@@ -10,13 +10,12 @@ package exp
  *
  * All error types are tagged with the part of the input code that causes the problem.
  */
-
 enum Error:
-  def msg: String
-  def offset: Int
-
   case Syntax(msg: String, offset: Int)
   case Type(msg: String, offset: Int, length: Int)
+
+  def msg: String
+  def offset: Int
 
 object Error:
   def apply(msg: String, exp: UntypedExp): Error.Type = Error.Type(msg, exp.offset, exp.length)
