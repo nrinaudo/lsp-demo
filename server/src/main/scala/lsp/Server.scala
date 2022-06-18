@@ -6,9 +6,11 @@ import org.eclipse.lsp4j.jsonrpc.services.{JsonDelegate, JsonNotification, JsonR
 import org.eclipse.lsp4j.services.LanguageClient
 import java.util.concurrent.CompletableFuture
 import scala.collection.JavaConverters.*
+import org.eclipse.lsp4j.jsonrpc.json.ResponseJsonAdapter
+import org.eclipse.lsp4j.adapters.DocumentSymbolResponseAdapter
 
 @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))
-class Server {
+class Server:
 
   // - State handling --------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
@@ -37,6 +39,7 @@ class Server {
       textDocumentSyncOptions.setChange(TextDocumentSyncKind.Full)
 
       capabilities.setTextDocumentSync(textDocumentSyncOptions)
+      capabilities.setDocumentSymbolProvider(true)
 
       val serverInfo = new ServerInfo("LSP Demo", BuildInfo.toString)
 
@@ -77,4 +80,14 @@ class Server {
     pubDiagnostic.setVersion(version)
     client.publishDiagnostics(pubDiagnostic)
 
-}
+  @JsonRequest(value = "textDocument/documentSymbol", useSegment = false)
+  @ResponseJsonAdapter(classOf[DocumentSymbolResponseAdapter])
+  def documentSymbol(
+    params: DocumentSymbolParams
+  ): CompletableFuture[java.util.List[DocumentSymbol]] =
+    val symbols = new CompletableFuture[java.util.List[DocumentSymbol]]
+
+    symbols.complete {
+      sourceFiles.symbols(params).asJava
+    }
+    symbols

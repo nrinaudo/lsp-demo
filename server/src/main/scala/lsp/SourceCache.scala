@@ -17,6 +17,13 @@ import scala.collection.JavaConverters.*
 class SourceCache:
   val cache: Map[String, CacheItem] = Map.empty
 
+  private def lookup(uri: String): Option[CacheItem] = cache.synchronized {
+    cache.get(uri)
+  }
+
+  // - Lifecycle events ------------------------------------------------------------------------------------------------
+  // -------------------------------------------------------------------------------------------------------------------
+
   def open(params: DidOpenTextDocumentParams): List[Diagnostic] =
     val item = CacheItem(params.getTextDocument.getText)
     cache.synchronized {
@@ -38,6 +45,40 @@ class SourceCache:
       }
 
       item.diagnostics
+    }.getOrElse(List.empty)
+
+  // - Symbols retrieval -----------------------------------------------------------------------------------------------
+  // -------------------------------------------------------------------------------------------------------------------
+
+  private def symbols(exp: UntypedExp, map: PositionMap): DocumentSymbol =
+    val range = Range(map.toPosition(exp.offset), map.toPosition(exp.offset + exp.length))
+
+    exp match
+      case UntypedExp.Num(value, offset, length) =>
+        DocumentSymbol(value.toString, SymbolKind.Number, range, range)
+
+      case UntypedExp.Bool(value, offset, length) =>
+        DocumentSymbol(value.toString, SymbolKind.Boolean, range, range)
+
+      case UntypedExp.Add(lhs, rhs, offset, length) =>
+        val symbol = DocumentSymbol("+", SymbolKind.Operator, range, range)
+        symbol.setChildren(List(symbols(lhs, map), symbols(rhs, map)).asJava)
+        symbol
+
+      case UntypedExp.Eq(lhs, rhs, offset, length) =>
+        val symbol = DocumentSymbol("=", SymbolKind.Operator, range, range)
+        symbol.setChildren(List(symbols(lhs, map), symbols(rhs, map)).asJava)
+        symbol
+
+      case UntypedExp.Cond(cond, ifTrue, ifFalse, offset, length) =>
+        val symbol = DocumentSymbol("if", SymbolKind.Operator, range, range)
+        symbol.setChildren(List(symbols(cond, map), symbols(ifTrue, map), symbols(ifFalse, map)).asJava)
+        symbol
+
+  def symbols(params: DocumentSymbolParams): List[DocumentSymbol] =
+    lookup(params.getTextDocument.getUri).map {
+      case CacheItem.Valid(_, map, exp, _) => List(symbols(exp, map))
+      case _: CacheItem.Invalid            => List.empty
     }.getOrElse(List.empty)
 
 // - Internals ---------------------------------------------------------------------------------------------------------
