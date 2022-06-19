@@ -50,9 +50,11 @@ class SourceCache:
 
   // - Symbols retrieval -----------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
+  private def toRange(map: PositionMap, loc: Location): Range =
+    Range(map.toPosition(loc.offset), map.toPosition(loc.offset + loc.length))
 
   private def symbols(exp: UntypedExp, map: PositionMap): DocumentSymbol =
-    val range = Range(map.toPosition(exp.loc.offset), map.toPosition(exp.loc.offset + exp.loc.length))
+    val range = toRange(map, exp.loc)
 
     exp match
       case UntypedExp.Num(value, _) =>
@@ -61,18 +63,18 @@ class SourceCache:
       case UntypedExp.Bool(value, _) =>
         DocumentSymbol(value.toString, SymbolKind.Boolean, range, range)
 
-      case UntypedExp.Add(lhs, rhs, _) =>
-        val symbol = DocumentSymbol("+", SymbolKind.Operator, range, range)
+      case UntypedExp.Add(lhs, rhs, _, opLoc) =>
+        val symbol = DocumentSymbol("+", SymbolKind.Operator, range, toRange(map, opLoc))
         symbol.setChildren(List(symbols(lhs, map), symbols(rhs, map)).asJava)
         symbol
 
-      case UntypedExp.Eq(lhs, rhs, _) =>
-        val symbol = DocumentSymbol("=", SymbolKind.Operator, range, range)
+      case UntypedExp.Eq(lhs, rhs, _, opLoc) =>
+        val symbol = DocumentSymbol("=", SymbolKind.Operator, range, toRange(map, opLoc))
         symbol.setChildren(List(symbols(lhs, map), symbols(rhs, map)).asJava)
         symbol
 
-      case UntypedExp.Cond(cond, ifTrue, ifFalse, _) =>
-        val symbol = DocumentSymbol("if", SymbolKind.Operator, range, range)
+      case UntypedExp.Cond(cond, ifTrue, ifFalse, _, ifLoc, _, _) =>
+        val symbol = DocumentSymbol("if", SymbolKind.Operator, range, toRange(map, ifLoc))
         symbol.setChildren(List(symbols(cond, map), symbols(ifTrue, map), symbols(ifFalse, map)).asJava)
         symbol
 
