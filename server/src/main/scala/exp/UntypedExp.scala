@@ -1,6 +1,7 @@
 package exp
 
 import TypedExp.Checked
+import parser.Location
 
 /** Untyped AST for our language.
   *
@@ -16,19 +17,18 @@ import TypedExp.Checked
   * expected output type.
   */
 enum UntypedExp:
-  def offset: Int
-  def length: Int
+  def loc: Location
 
 // - AST structure -----------------------------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------------------------
 
-  case Num(value: Int, offset: Int, length: Int)
-  case Bool(value: Boolean, offset: Int, length: Int)
+  case Num(value: Int, loc: Location)
+  case Bool(value: Boolean, loc: Location)
 
-  case Add(lhs: UntypedExp, rhs: UntypedExp, offset: Int, length: Int)
-  case Eq(lhs: UntypedExp, rhs: UntypedExp, offset: Int, length: Int)
+  case Add(lhs: UntypedExp, rhs: UntypedExp, loc: Location)
+  case Eq(lhs: UntypedExp, rhs: UntypedExp, loc: Location)
 
-  case Cond(cond: UntypedExp, ifTrue: UntypedExp, ifFalse: UntypedExp, offset: Int, length: Int)
+  case Cond(cond: UntypedExp, ifTrue: UntypedExp, ifFalse: UntypedExp, loc: Location)
 
   // - Type checking ---------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
@@ -49,17 +49,17 @@ enum UntypedExp:
   def typeCheck: Either[List[Error.Type], TypedExp] =
     this match
       // Literals.
-      case Num(value, _, _)  => Right(Checked(Type.Num, Exp.Num(value)))
-      case Bool(value, _, _) => Right(Checked(Type.Bool, Exp.Bool(value)))
+      case Num(value, _)  => Right(Checked(Type.Num, Exp.Num(value)))
+      case Bool(value, _) => Right(Checked(Type.Bool, Exp.Bool(value)))
 
       // Simple binary operations.
-      case Add(lhs, rhs, _, _) =>
+      case Add(lhs, rhs, _) =>
         utils.combine(lhs.as(Type.Num), rhs.as(Type.Num))((left, right) => Checked(Type.Num, Exp.Add(left, right)))
 
-      case Eq(lhs, rhs, _, _) =>
+      case Eq(lhs, rhs, _) =>
         utils.combine(lhs.as(Type.Num), rhs.as(Type.Num))((left, right) => Checked(Type.Bool, Exp.Eq(left, right)))
 
-      case Cond(cond, ifTrue, ifFalse, _, _) =>
+      case Cond(cond, ifTrue, ifFalse, _) =>
         def makeExp(c: Exp[Boolean], branches: Unify) = branches match
           case Unify.Success(tpe, l, r) => Right(Checked(tpe, Exp.Cond(c, l, r)))
 
@@ -72,5 +72,5 @@ object UntypedExp:
   import parser.ParseResult.{Failure, Success}
 
   def parse(input: String): Either[Error.Syntax, UntypedExp] = expParser.run(input) match
-    case Failure(err, offset)  => Left(Error.Syntax(err, offset))
-    case Success(exp, _, _, _) => Right(exp)
+    case Failure(err, offset) => Left(Error.Syntax(err, offset))
+    case Success(exp, _, _)   => Right(exp)

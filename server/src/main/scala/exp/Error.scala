@@ -1,5 +1,7 @@
 package exp
 
+import parser.Location
+
 /* Declares all supported error types.
  *
  * Syntax errors occur at parse time. If the parser finds a character it's not expecting, it'll just report it and
@@ -12,10 +14,9 @@ package exp
  */
 enum Error:
   case Syntax(msg: String, offset: Int)
-  case Type(msg: String, offset: Int, length: Int)
+  case Type(msg: String, loc: Location)
 
   def msg: String
-  def offset: Int
 
 object Error:
-  def apply(msg: String, exp: UntypedExp): Error.Type = Error.Type(msg, exp.offset, exp.length)
+  def apply(msg: String, exp: UntypedExp): Error.Type = Error.Type(msg, exp.loc)

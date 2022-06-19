@@ -19,15 +19,17 @@ trait Parser[A]:
   protected def run(state: Parser.State): ParseResult[A]
 
   /** Exposes the offset and length of the token that was found by this parser. */
-  def withPosition: Parser[(A, Int, Int)] = state => run(state).withPosition
+  def withLocation: Parser[(A, Location)] = state => run(state).withLocation
 
   def map[B](f: A => B): Parser[B] = str => run(str).map(f)
 
   def flatMap[B](f: A => Parser[B]): Parser[B] = state =>
     run(state) match
       case Failure(err, offset) => ParseResult.Failure(err, offset)
-      case Success(a, rest, offset, length) =>
-        f(a).run(Parser.State(rest, offset + length)).move(_ => offset).adjust(_ + length)
+      case Success(a, rest, Location(offset, length)) =>
+        f(a)
+          .run(Parser.State(rest, offset + length))
+          .adjustLocation(loc => Location(offset = offset, length = loc.length + length))
 
   /** Similar to `map`, but with the ability to fail. */
   def emap[B](f: A => Either[String, B]): Parser[B] = state => run(state).emap(f)
@@ -53,11 +55,11 @@ trait Parser[A]:
   def * : Parser[List[A]] =
     def go(state: Parser.State, acc: List[A], currLength: Int): ParseResult[List[A]] =
       run(state) match
-        case Failure(err, offset) => Success(acc, state.input, offset, currLength)
-        case Success(a, rest, offset, length) =>
+        case Failure(err, offset) => Success(acc, state.input, Location(offset, currLength))
+        case Success(a, rest, Location(offset, length)) =>
           go(Parser.State(rest, offset + length), a :: acc, currLength + length)
 
-    state => go(state, Nil, 0).map(_.reverse).move(_ => state.offset)
+    state => go(state, Nil, 0).map(_.reverse).adjustLocation(_.copy(offset = state.offset))
 
   def + : Parser[List[A]] = (this ~ this.*).map((head, tail) => head :: tail)
 
@@ -68,11 +70,11 @@ trait Parser[A]:
 object Parser:
   case class State(input: String, offset: Int)
 
-  def pure[A](a: A): Parser[A] = state => Success(a, state.input, 0, 0)
+  def pure[A](a: A): Parser[A] = state => Success(a, state.input, Location(0, 0))
 
   def char: Parser[Char] = state =>
     state.input.headOption match
-      case Some(c) => Success(c, state.input.drop(1), state.offset, 1)
+      case Some(c) => Success(c, state.input.drop(1), Location(state.offset, 1))
       case None    => Failure("Expected a character but found the empty string", state.offset)
 
   def char(c: Char): Parser[Char] = char.emap(c2 => Either.cond(c == c2, c, s"Expected $c but found $c2"))
@@ -94,5 +96,5 @@ object Parser:
   def whitespace: Parser[Char] = oneOf(' ', '\t', '\r', '\n')
 
   val end: Parser[Unit] = state =>
-    if state.input.isEmpty then Success((), "", 0, 0)
+    if state.input.isEmpty then Success((), "", Location(0, 0))
     else Failure(s"Expected EOS but found ${state.input}", 0)

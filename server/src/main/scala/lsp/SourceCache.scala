@@ -1,5 +1,6 @@
 package lsp
 
+import parser.Location
 import org.eclipse.lsp4j.*
 import exp.{Error, TypedExp, UntypedExp}
 import org.eclipse.lsp4j.Diagnostic
@@ -51,26 +52,26 @@ class SourceCache:
   // -------------------------------------------------------------------------------------------------------------------
 
   private def symbols(exp: UntypedExp, map: PositionMap): DocumentSymbol =
-    val range = Range(map.toPosition(exp.offset), map.toPosition(exp.offset + exp.length))
+    val range = Range(map.toPosition(exp.loc.offset), map.toPosition(exp.loc.offset + exp.loc.length))
 
     exp match
-      case UntypedExp.Num(value, offset, length) =>
+      case UntypedExp.Num(value, _) =>
         DocumentSymbol(value.toString, SymbolKind.Number, range, range)
 
-      case UntypedExp.Bool(value, offset, length) =>
+      case UntypedExp.Bool(value, _) =>
         DocumentSymbol(value.toString, SymbolKind.Boolean, range, range)
 
-      case UntypedExp.Add(lhs, rhs, offset, length) =>
+      case UntypedExp.Add(lhs, rhs, _) =>
         val symbol = DocumentSymbol("+", SymbolKind.Operator, range, range)
         symbol.setChildren(List(symbols(lhs, map), symbols(rhs, map)).asJava)
         symbol
 
-      case UntypedExp.Eq(lhs, rhs, offset, length) =>
+      case UntypedExp.Eq(lhs, rhs, _) =>
         val symbol = DocumentSymbol("=", SymbolKind.Operator, range, range)
         symbol.setChildren(List(symbols(lhs, map), symbols(rhs, map)).asJava)
         symbol
 
-      case UntypedExp.Cond(cond, ifTrue, ifFalse, offset, length) =>
+      case UntypedExp.Cond(cond, ifTrue, ifFalse, _) =>
         val symbol = DocumentSymbol("if", SymbolKind.Operator, range, range)
         symbol.setChildren(List(symbols(cond, map), symbols(ifTrue, map), symbols(ifFalse, map)).asJava)
         symbol
@@ -101,11 +102,11 @@ private object CacheItem:
     val map = PositionMap(source)
 
     def range(error: Error): Range =
-      val start = map.toPosition(error.offset)
-      val end = error match
-        case Error.Type(_, offset, length) => map.toPosition(offset + length)
-        case _: Error.Syntax               => start
-      Range(start, end)
+      error match
+        case Error.Type(_, Location(offset, length)) => Range(map.toPosition(offset), map.toPosition(offset + length))
+        case Error.Syntax(_, offset) =>
+          val pos = map.toPosition(offset)
+          Range(pos, pos)
 
     def asDiagnostic(error: Error): Diagnostic =
 

@@ -18,27 +18,23 @@ private val expParser: Parser[UntypedExp] =
     string(op).surroundedWith(whitespace.*)
 
   // Literal expressions.
-  val literal: Parser[UntypedExp] = bool.withPosition.map(Bool.apply) | num.withPosition.map(Num.apply)
+  val literal: Parser[UntypedExp] = bool.withLocation.map(Bool.apply) | num.withLocation.map(Num.apply)
 
   // If / then / else.
   def cond: Parser[UntypedExp] =
-    ((operator("if") *> exp) ~ (operator("then") *> exp) ~ (operator("else") *> exp)).withPosition.map {
-      case (((cond, ifTrue), ifFalse), offset, length) => Cond(cond, ifTrue, ifFalse, offset, length)
+    ((operator("if") *> exp) ~ (operator("then") *> exp) ~ (operator("else") *> exp)).withLocation.map {
+      case (((cond, ifTrue), ifFalse), loc) => Cond(cond, ifTrue, ifFalse, loc)
     }
 
   // Numeric equality. Note how it's defined in terms of add, which is defined in terms of paren, which is defined
   // in terms of eq. This allows us to have a relatively straightforward encoding of operator priority.
   def eq: Parser[UntypedExp] =
-    val compound = ((add <* operator("=")) ~ eq).withPosition.map { case ((lhs, rhs), offset, length) =>
-      Eq(lhs, rhs, offset, length)
-    }
+    val compound = ((add <* operator("=")) ~ eq).withLocation.map { case ((lhs, rhs), loc) => Eq(lhs, rhs, loc) }
     compound | add
 
   // Numeric addition.
   def add: Parser[UntypedExp] =
-    val compound = ((paren <* operator("+")) ~ add).withPosition.map { case ((lhs, rhs), offset, length) =>
-      Add(lhs, rhs, offset, length)
-    }
+    val compound = ((paren <* operator("+")) ~ add).withLocation.map { case ((lhs, rhs), loc) => Add(lhs, rhs, loc) }
 
     compound | paren
 
