@@ -16,7 +16,7 @@ import scala.collection.JavaConverters.*
   * richer informations to clients, such as error reporting, symbol tables, semantic tokens...
   */
 class SourceCache:
-  val cache: Map[String, CacheItem] = Map.empty
+  private val cache: Map[String, CacheItem] = Map.empty
 
   private def lookup(uri: String): Option[CacheItem] = cache.synchronized {
     cache.get(uri)
@@ -47,6 +47,11 @@ class SourceCache:
 
       item.diagnostics
     }.getOrElse(List.empty)
+
+  // - Diagnostics retrieval -------------------------------------------------------------------------------------------
+  // -------------------------------------------------------------------------------------------------------------------
+  def diagnostics(params: DocumentDiagnosticParams): List[Diagnostic] =
+    lookup(params.getTextDocument.getUri).map(_.diagnostics).getOrElse(List.empty)
 
   // - Symbols retrieval -----------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------

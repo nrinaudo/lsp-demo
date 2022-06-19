@@ -16,9 +16,15 @@ class Server:
   // -------------------------------------------------------------------------------------------------------------------
   val sourceFiles: SourceCache = SourceCache()
   var client: LanguageClient   = null
+  var pushDiagnostics          = true
 
   def connect(cli: LanguageClient): Unit =
     client = cli
+
+  def future[A](a: => A): CompletableFuture[A] =
+    val future = new CompletableFuture[A]
+    future.complete(a)
+    future
 
   // - Initialisation / shutdown ---------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
@@ -29,23 +35,26 @@ class Server:
   @JsonRequest(value = "initialize", useSegment = false) def initialize(
     p: InitializeParams
   ): CompletableFuture[InitializeResult] =
-
-    val init = new CompletableFuture[InitializeResult]
-    init.complete {
+    future {
       val capabilities = new ServerCapabilities()
 
       val textDocumentSyncOptions = new TextDocumentSyncOptions()
       textDocumentSyncOptions.setOpenClose(true)
       textDocumentSyncOptions.setChange(TextDocumentSyncKind.Full)
+      capabilities.setDiagnosticProvider(new DiagnosticRegistrationOptions(false, false))
 
       capabilities.setTextDocumentSync(textDocumentSyncOptions)
       capabilities.setDocumentSymbolProvider(true)
 
       val serverInfo = new ServerInfo("LSP Demo", BuildInfo.toString)
 
+      // If the client supports pull-based diagnostics, we don't need to push them.
+      // Note that I'm not at all sure this is the right way of testing for that, the documentation and types are
+      // a little bit unclear.
+      if(p.getCapabilities.getTextDocument.getDiagnostic != null) pushDiagnostics = false
+
       new InitializeResult(capabilities, serverInfo)
     }
-    init
 
   @JsonRequest(value = "shutdown", useSegment = false) def shutdown(): CompletableFuture[Object] =
     CompletableFuture[Object]()
@@ -61,13 +70,15 @@ class Server:
   def didChange(params: DidChangeTextDocumentParams): Unit =
     val diags = sourceFiles.change(params)
 
-    pushDiagnostics(diags, params.getTextDocument.getUri, params.getTextDocument.getVersion)
+    if(pushDiagnostics)
+      pushDiagnostics(diags, params.getTextDocument.getUri, params.getTextDocument.getVersion)
 
   @JsonNotification(value = "textDocument/didOpen", useSegment = false)
   def didOpen(params: DidOpenTextDocumentParams): Unit =
     val diags = sourceFiles.open(params)
 
-    pushDiagnostics(diags, params.getTextDocument.getUri, params.getTextDocument.getVersion)
+    if(pushDiagnostics)
+      pushDiagnostics(diags, params.getTextDocument.getUri, params.getTextDocument.getVersion)
 
   @JsonNotification(value = "textDocument/didClose", useSegment = false)
   def didClose(params: DidCloseTextDocumentParams): Unit =
@@ -75,19 +86,26 @@ class Server:
 
   // - Diagnostics -----------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
+
+  @JsonRequest(value = "textDocument/diagnostic", useSegment = false)
+  def diagnostic(params: DocumentDiagnosticParams): CompletableFuture[DocumentDiagnosticReport] =
+    future {
+      DocumentDiagnosticReport(RelatedFullDocumentDiagnosticReport(sourceFiles.diagnostics(params).asJava))
+    }
+
   def pushDiagnostics(diags: List[Diagnostic], uri: String, version: Int): Unit =
     val pubDiagnostic = new PublishDiagnosticsParams(uri, diags.asJava)
     pubDiagnostic.setVersion(version)
     client.publishDiagnostics(pubDiagnostic)
+
+  // - Symbols ---------------------------------------------------------------------------------------------------------
+  // -------------------------------------------------------------------------------------------------------------------
 
   @JsonRequest(value = "textDocument/documentSymbol", useSegment = false)
   @ResponseJsonAdapter(classOf[DocumentSymbolResponseAdapter])
   def documentSymbol(
     params: DocumentSymbolParams
   ): CompletableFuture[java.util.List[DocumentSymbol]] =
-    val symbols = new CompletableFuture[java.util.List[DocumentSymbol]]
-
-    symbols.complete {
+    future {
       sourceFiles.symbols(params).asJava
     }
-    symbols
