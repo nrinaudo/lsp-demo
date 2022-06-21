@@ -25,24 +25,24 @@ class SourceCache:
   // - Lifecycle events ------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
 
-  def open(params: DidOpenTextDocumentParams): List[Diagnostic] =
-    val item = CacheItem(params.getTextDocument.getText)
+  def open(uri: String, text: String): List[Diagnostic] =
+    val item = CacheItem(text)
     cache.synchronized {
-      cache.update(params.getTextDocument.getUri, item)
+      cache.update(uri, item)
     }
 
     item.diagnostics
 
-  def close(params: DidCloseTextDocumentParams): Unit = cache.synchronized {
-    cache.remove(params.getTextDocument.getUri)
+  def close(uri: String): Unit = cache.synchronized {
+    cache.remove(uri)
   }
 
-  def change(params: DidChangeTextDocumentParams): List[Diagnostic] =
-    params.getContentChanges.asScala.headOption.map { change =>
+  def change(uri: String, changes: List[TextDocumentContentChangeEvent]): List[Diagnostic] =
+    changes.headOption.map { change =>
       val item = CacheItem(change.getText)
 
       cache.synchronized {
-        cache.update(params.getTextDocument.getUri, item)
+        cache.update(uri, item)
       }
 
       item.diagnostics
@@ -50,8 +50,17 @@ class SourceCache:
 
   // - Diagnostics retrieval -------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
-  def diagnostics(params: DocumentDiagnosticParams): List[Diagnostic] =
-    lookup(params.getTextDocument.getUri).map(_.diagnostics).getOrElse(List.empty)
+  def diagnostics(uri: String): List[Diagnostic] =
+    lookup(uri).map(_.diagnostics).getOrElse(List.empty)
+
+  // - Semantic tokens retrieval ---------------------------------------------------------------------------------------
+  // -------------------------------------------------------------------------------------------------------------------
+  def semanticTokens(uri: String): List[Int] =
+    lookup(uri).map {
+      case CacheItem.Valid(_, map, exp, _) => SemanticToken.encode(exp, map)
+      case _: CacheItem.Invalid            => List.empty
+
+    }.getOrElse(List.empty)
 
   // - Symbols retrieval -----------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
@@ -83,8 +92,8 @@ class SourceCache:
         symbol.setChildren(List(symbols(cond, map), symbols(ifTrue, map), symbols(ifFalse, map)).asJava)
         symbol
 
-  def symbols(params: DocumentSymbolParams): List[DocumentSymbol] =
-    lookup(params.getTextDocument.getUri).map {
+  def symbols(uri: String): List[DocumentSymbol] =
+    lookup(uri).map {
       case CacheItem.Valid(_, map, exp, _) => List(symbols(exp, map))
       case _: CacheItem.Invalid            => List.empty
     }.getOrElse(List.empty)

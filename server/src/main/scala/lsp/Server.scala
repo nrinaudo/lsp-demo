@@ -43,6 +43,9 @@ class Server:
       textDocumentSyncOptions.setChange(TextDocumentSyncKind.Full)
       capabilities.setDiagnosticProvider(new DiagnosticRegistrationOptions(false, false))
 
+      capabilities.setSemanticTokensProvider(
+        new SemanticTokensWithRegistrationOptions(SemanticToken.legend, true, false)
+      )
       capabilities.setTextDocumentSync(textDocumentSyncOptions)
       capabilities.setDocumentSymbolProvider(true)
 
@@ -68,21 +71,21 @@ class Server:
 
   @JsonNotification(value = "textDocument/didChange", useSegment = false)
   def didChange(params: DidChangeTextDocumentParams): Unit =
-    val diags = sourceFiles.change(params)
+    val diags = sourceFiles.change(params.getTextDocument.getUri, params.getContentChanges.asScala.toList)
 
     if(pushDiagnostics)
       pushDiagnostics(diags, params.getTextDocument.getUri, params.getTextDocument.getVersion)
 
   @JsonNotification(value = "textDocument/didOpen", useSegment = false)
   def didOpen(params: DidOpenTextDocumentParams): Unit =
-    val diags = sourceFiles.open(params)
+    val diags = sourceFiles.open(params.getTextDocument.getUri, params.getTextDocument.getText)
 
     if(pushDiagnostics)
       pushDiagnostics(diags, params.getTextDocument.getUri, params.getTextDocument.getVersion)
 
   @JsonNotification(value = "textDocument/didClose", useSegment = false)
   def didClose(params: DidCloseTextDocumentParams): Unit =
-    sourceFiles.close(params)
+    sourceFiles.close(params.getTextDocument.getUri)
 
   // - Diagnostics -----------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
@@ -90,7 +93,9 @@ class Server:
   @JsonRequest(value = "textDocument/diagnostic", useSegment = false)
   def diagnostic(params: DocumentDiagnosticParams): CompletableFuture[DocumentDiagnosticReport] =
     future {
-      DocumentDiagnosticReport(RelatedFullDocumentDiagnosticReport(sourceFiles.diagnostics(params).asJava))
+      DocumentDiagnosticReport(
+        RelatedFullDocumentDiagnosticReport(sourceFiles.diagnostics(params.getTextDocument.getUri).asJava)
+      )
     }
 
   def pushDiagnostics(diags: List[Diagnostic], uri: String, version: Int): Unit =
@@ -107,5 +112,19 @@ class Server:
     params: DocumentSymbolParams
   ): CompletableFuture[java.util.List[DocumentSymbol]] =
     future {
-      sourceFiles.symbols(params).asJava
+      sourceFiles.symbols(params.getTextDocument.getUri).asJava
     }
+
+  // - Semantic tokens -------------------------------------------------------------------------------------------------
+  // -------------------------------------------------------------------------------------------------------------------
+
+  def semanticTokens(uri: String) =
+    SemanticTokens(sourceFiles.semanticTokens(uri).map(Integer.valueOf).asJava)
+
+  @JsonRequest(value = "textDocument/semanticTokens/full", useSegment = false)
+  def semanticTokensFull(params: SemanticTokensParams): CompletableFuture[SemanticTokens] =
+    future(semanticTokens(params.getTextDocument.getUri))
+
+  @JsonRequest(value = "textDocument/semanticTokens/full/delta", useSegment = false)
+  def semanticTokensFullDelta(params: SemanticTokensDeltaParams): CompletableFuture[SemanticTokens] =
+    future(semanticTokens(params.getTextDocument.getUri))
