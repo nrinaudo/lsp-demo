@@ -5,7 +5,7 @@ package exp
  * types. This is where `Type` comes in.
  *
  * We want to go a little bit further than that though: the output of type-checking is a typed AST, with *static* type
- * constraints. We need a way to match runtime "type as values" with compile time static types. This is achieved with
+ * constraints. We need a way to match runtime "type as values" with compile-time static types. This is achieved with
  * `Equality`, which allows us to compare two types and, if possible, return a proof of their equality. This is
  * represented as a GADT, which allows the compiler to conclude, in the presence of `Equality[A, B]`, that `A` and `B`
  * are in fact the same type.
@@ -59,9 +59,9 @@ private object Unify:
           case _ =>
             Left(
               List(
-                Error(s"Could not unify $lt and $rt", left),
-                Error(s"Could not unify $rt and $lt", right)
-              )
+                Error.Type(s"Could not unify $lt and $rt", left.loc),
+                Error.Type(s"Could not unify $rt and $lt", right.loc)
+              ): List[Error.Type] // Not entirely sure why this type ascription is necessary...
             )
 
     utils.flatCombine(left.typeCheck, right.typeCheck)(unify)

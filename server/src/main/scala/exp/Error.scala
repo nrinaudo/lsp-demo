@@ -13,10 +13,8 @@ import parser.Location
  * All error types are tagged with the part of the input code that causes the problem.
  */
 enum Error:
-  case Syntax(msg: String, offset: Int)
+  case Syntax(msg: String, loc: Location)
   case Type(msg: String, loc: Location)
 
   def msg: String
-
-object Error:
-  def apply(msg: String, exp: UntypedExp): Error.Type = Error.Type(msg, exp.loc)
+  def loc: Location

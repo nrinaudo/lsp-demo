@@ -2,7 +2,7 @@ package lsp
 
 import parser.Location
 import org.eclipse.lsp4j.*
-import exp.{Error, TypedExp, UntypedExp}
+import exp.{Error, Token, TypedExp, UntypedExp}
 import org.eclipse.lsp4j.Diagnostic
 import collection.mutable.Map
 import scala.collection.JavaConverters.*
@@ -57,8 +57,9 @@ class SourceCache:
   // -------------------------------------------------------------------------------------------------------------------
   def semanticTokens(uri: String): List[Int] =
     lookup(uri).map {
-      case CacheItem.Valid(_, map, exp, _) => SemanticToken.encode(exp, map)
-      case _: CacheItem.Invalid            => List.empty
+      case CacheItem.Valid(_, map, exp, _)     => SemanticToken.encode(exp, map)
+      case CacheItem.Tokens(_, map, tokens, _) => SemanticToken.encode(tokens, map)
+      case _: CacheItem.Invalid                => List.empty
 
     }.getOrElse(List.empty)
 
@@ -77,25 +78,25 @@ class SourceCache:
       case UntypedExp.Bool(value, _) =>
         DocumentSymbol(value.toString, SymbolKind.Boolean, range, range)
 
-      case UntypedExp.Add(lhs, rhs, _, opLoc) =>
-        val symbol = DocumentSymbol("+", SymbolKind.Operator, range, toRange(map, opLoc))
+      case UntypedExp.Add(lhs, rhs, op) =>
+        val symbol = DocumentSymbol("+", SymbolKind.Operator, range, toRange(map, op.loc))
         symbol.setChildren(List(symbols(lhs, map), symbols(rhs, map)).asJava)
         symbol
 
-      case UntypedExp.Eq(lhs, rhs, _, opLoc) =>
-        val symbol = DocumentSymbol("=", SymbolKind.Operator, range, toRange(map, opLoc))
+      case UntypedExp.Eq(lhs, rhs, op) =>
+        val symbol = DocumentSymbol("=", SymbolKind.Operator, range, toRange(map, op.loc))
         symbol.setChildren(List(symbols(lhs, map), symbols(rhs, map)).asJava)
         symbol
 
-      case UntypedExp.Cond(cond, ifTrue, ifFalse, _, ifLoc, _, _) =>
-        val symbol = DocumentSymbol("if", SymbolKind.Operator, range, toRange(map, ifLoc))
+      case UntypedExp.Cond(cond, ifTrue, ifFalse, ifToken, _, _) =>
+        val symbol = DocumentSymbol("if", SymbolKind.Operator, range, toRange(map, ifToken.loc))
         symbol.setChildren(List(symbols(cond, map), symbols(ifTrue, map), symbols(ifFalse, map)).asJava)
         symbol
 
   def symbols(uri: String): List[DocumentSymbol] =
     lookup(uri).map {
-      case CacheItem.Valid(_, map, exp, _) => List(symbols(exp, map))
-      case _: CacheItem.Invalid            => List.empty
+      case CacheItem.Valid(_, map, exp, _)           => List(symbols(exp, map))
+      case _: (CacheItem.Invalid | CacheItem.Tokens) => List.empty
     }.getOrElse(List.empty)
 
 // - Internals ---------------------------------------------------------------------------------------------------------
@@ -109,6 +110,9 @@ private enum CacheItem:
   /** Source file that failed to parse. */
   case Invalid(source: String, map: PositionMap, diagnostics: List[Diagnostic])
 
+  /** Source file that was tokenized, but couldn't be turned into an untyped exp. */
+  case Tokens(source: String, map: PositionMap, tokens: List[Token], diagnostics: List[Diagnostic])
+
   /** Source file that parsed (but potentially failed to type-check). */
   case Valid(source: String, map: PositionMap, exp: UntypedExp, diagnostics: List[Diagnostic])
 
@@ -118,11 +122,7 @@ private object CacheItem:
     val map = PositionMap(source)
 
     def range(error: Error): Range =
-      error match
-        case Error.Type(_, Location(offset, length)) => Range(map.toPosition(offset), map.toPosition(offset + length))
-        case Error.Syntax(_, offset) =>
-          val pos = map.toPosition(offset)
-          Range(pos, pos)
+      Range(map.toPosition(error.loc.offset), map.toPosition(error.loc.offset + error.loc.length))
 
     def asDiagnostic(error: Error): Diagnostic =
 
@@ -133,6 +133,18 @@ private object CacheItem:
 
       diag
 
-    UntypedExp.parse(source) match
-      case Left(error)    => Invalid(source, map, List(asDiagnostic(error)))
-      case Right(untyped) => Valid(source, map, untyped, untyped.typeCheck.left.getOrElse(List.empty).map(asDiagnostic))
+    Token.parse(source) match
+      case Left(error)   => Invalid(source, map, List(asDiagnostic(error)))
+      case Right(tokens) =>
+        // If we have unknown tokens, there's no point even trying to type check. We can, however, yield interesting
+        // error messages focusing on these unknown tokens.
+        val unknown = tokens.collect { case Token.Unknown(token, loc) =>
+          asDiagnostic(Error.Type(s"Unexpected token: $token", loc))
+        }
+
+        if unknown.nonEmpty then Tokens(source, map, tokens, unknown)
+        else
+          UntypedExp.parse(tokens) match
+            case Left(error) => Tokens(source, map, tokens, List(asDiagnostic(error)))
+            case Right(untyped) =>
+              Valid(source, map, untyped, untyped.typeCheck.left.getOrElse(List.empty).map(asDiagnostic))

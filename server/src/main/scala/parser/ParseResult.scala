@@ -1,26 +1,35 @@
 package parser
 
 /** Basically a specialised `Either` for parsing results. */
-enum ParseResult[+A]:
-  case Success(value: A, rest: String, loc: Location)
-  case Failure(err: String, offset: Int)
+enum ParseResult[+A, +Token]:
+  // - parsed value.
+  // - whatever's left to consume in the input.
+  // - range (offset + length) of the original input this parsed value represented.
+  case Success(value: A, rest: List[Token], loc: Location)
+
+  // - error message
+  // - label of the parser that failed. This is typically going to be "digit" to group "0 to 9", and is useful for
+  //   writing meaningful error messages.
+  // - offset in the original input at which the error occured.
+  case Failure(err: String, label: String, offset: Int) extends ParseResult[Nothing, Nothing]
+
+  def withLabel(label: String): ParseResult[A, Token] = this match
+    case failure: Failure         => failure.copy(label = label)
+    case other: Success[A, Token] => other
 
   /** "Tags" the result with its offset and length. */
-  def withLocation: ParseResult[(A, Location)] = this match
+  def withLocation: ParseResult[(A, Location), Token] = this match
     case Success(value, rest, loc) => Success((value, loc), rest, loc)
-    case Failure(err, offset)      => Failure(err, offset)
+    case other: Failure            => other
 
-  def map[B](f: A => B): ParseResult[B] = this match
+  def map[B](f: A => B): ParseResult[B, Token] = this match
     case Success(value, rest, loc) => Success(f(value), rest, loc)
-    case Failure(err, offset)      => Failure(err, offset)
+    case other: Failure            => other
 
-  def emap[B](f: A => Either[String, B]): ParseResult[B] = this.map(f) match
-    case Success(Right(b), rest, loc) => Success(b, rest, loc)
-    case Success(Left(err), _, loc)   => Failure(err, loc.offset)
-    case Failure(err, offset)         => Failure(err, offset)
+  def mapLocation(f: Location => Location): ParseResult[A, Token] = this match
+    case s: Success[A, Token] => s.copy(loc = f(s.loc))
+    case other: Failure       => other
 
-  def adjustLocation(f: Location => Location): ParseResult[A] = this match
-    case s: Success[A] => s.copy(loc = f(s.loc))
-    case other         => other
-
-case class Location(offset: Int, length: Int)
+  def toEither[B](f: (String, Int) => B): Either[B, A] = this match
+    case Success(value, _, _)        => Right(value)
+    case Failure(err, label, offset) => Left(f(s"Error while parsing $label: $err", offset))

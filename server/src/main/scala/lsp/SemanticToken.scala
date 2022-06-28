@@ -5,7 +5,7 @@ import org.eclipse.lsp4j.SemanticTokenModifiers
 import org.eclipse.lsp4j.SemanticTokensLegend
 import scala.collection.JavaConverters.*
 import scala.collection.mutable.ArrayBuilder
-import exp.UntypedExp
+import exp.{Token, UntypedExp}
 import parser.Location
 import scala.annotation.tailrec
 import scala.collection.mutable.Builder
@@ -14,12 +14,6 @@ import org.eclipse.lsp4j.DocumentOnTypeFormattingOptions
 /** Defines tools for turning an [[UntypedExp]] into a list of semantic tokens.
   *
   * This, as far as I can tell, is mostly useful for syntax highlighting.
-  *
-  * Note that this entire approach might be flawed: since an [[UntypedExp]] is needed to provide tokens for syntax
-  * highlighting, it means we can't provide any for code that doesn't parse. Thoughts on how to solve this:
-  *   - support incremental changes to a file. In the scenario of a file that stops parsing, we could then keep all
-  *     information we computed for parts of the file that are not touched by the last edit.
-  *   - have a more lenient parser for extracting semantic tokens, although this seems like a lot of work...
   */
 
 // - Data structure ----------------------------------------------------------------------------------------------------
@@ -42,8 +36,23 @@ object SemanticToken:
   def encode(exp: UntypedExp, map: PositionMap): List[Int] =
     encodeTokens(toTokens(exp, map))
 
+  def encode(tokens: List[Token], map: PositionMap): List[Int] =
+    encodeTokens(toTokens(tokens, map))
+
+  private def token(loc: Location, map: PositionMap, tokenType: String, modifiers: List[String]): SemanticToken =
+    val pos = map.toPosition(loc.offset)
+
+    SemanticToken(pos.getLine, pos.getCharacter, loc.length, tokenType, modifiers)
+
+  private def numToken(loc: Location, map: PositionMap): SemanticToken =
+    token(loc, map, SemanticTokenTypes.Number, List(SemanticTokenModifiers.Readonly))
+
+  private def boolToken(loc: Location, map: PositionMap): SemanticToken =
+    token(loc, map, SemanticTokenTypes.Keyword, List(SemanticTokenModifiers.Readonly))
+
   // - Type / Modifier to / from ints ----------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
+
   val legend: SemanticTokensLegend = SemanticTokensLegend(
     List(SemanticTokenTypes.Operator, SemanticTokenTypes.Number, SemanticTokenTypes.Keyword).asJava,
     List(SemanticTokenModifiers.Readonly).asJava
@@ -51,37 +60,48 @@ object SemanticToken:
   val tokenTypes: Map[String, Int]     = legend.getTokenTypes.asScala.zipWithIndex.toMap
   val tokenModifiers: Map[String, Int] = legend.getTokenModifiers.asScala.zipWithIndex.toMap
 
+  // - Tokens to semantic tokens ---------------------------------------------------------------------------------------
+  // -------------------------------------------------------------------------------------------------------------------
+  def toTokens(tokens: List[Token], map: PositionMap): List[SemanticToken] =
+    tokens.collect {
+      case Token.Bool(_, loc)    => boolToken(loc, map)
+      case Token.Num(value, loc) => numToken(loc, map)
+      case Token.LeftParen(loc)  => token(loc, map, SemanticTokenTypes.Operator, List.empty)
+      case Token.RightParen(loc) => token(loc, map, SemanticTokenTypes.Operator, List.empty)
+      case Token.If(loc)         => token(loc, map, SemanticTokenTypes.Keyword, List.empty)
+      case Token.Then(loc)       => token(loc, map, SemanticTokenTypes.Keyword, List.empty)
+      case Token.Else(loc)       => token(loc, map, SemanticTokenTypes.Keyword, List.empty)
+      case Token.Add(loc)        => token(loc, map, SemanticTokenTypes.Operator, List.empty)
+      case Token.Eq(loc)         => token(loc, map, SemanticTokenTypes.Operator, List.empty)
+    }
+
   // - Expression to tokens --------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
-  def toTokens(exp: UntypedExp, map: PositionMap): List[SemanticToken] =
-    def token(loc: Location, tokenType: String, modifiers: List[String]): SemanticToken =
-      val pos = map.toPosition(loc.offset)
 
-      SemanticToken(pos.getLine, pos.getCharacter, loc.length, tokenType, modifiers)
+  def toTokens(exp: UntypedExp, map: PositionMap): List[SemanticToken] =
 
     def go(curr: UntypedExp, acc: List[SemanticToken]): List[SemanticToken] = curr match
-      case UntypedExp.Num(_, loc) =>
-        token(loc, SemanticTokenTypes.Number, List(SemanticTokenModifiers.Readonly)) :: acc
+      case exp: UntypedExp.Num => numToken(exp.loc, map) :: acc
 
-      case UntypedExp.Bool(_, loc) =>
-        token(loc, SemanticTokenTypes.Keyword, List(SemanticTokenModifiers.Readonly)) :: acc
+      case exp: UntypedExp.Bool =>
+        boolToken(exp.loc, map) :: acc
 
-      case UntypedExp.Add(lhs, rhs, loc, opLoc) =>
-        val op = token(opLoc, SemanticTokenTypes.Operator, List.empty)
-
-        go(rhs, op :: go(lhs, acc))
-
-      case UntypedExp.Eq(lhs, rhs, loc, opLoc) =>
-        val op = token(opLoc, SemanticTokenTypes.Operator, List.empty)
+      case UntypedExp.Add(lhs, rhs, opToken) =>
+        val op = token(opToken.loc, map, SemanticTokenTypes.Operator, List.empty)
 
         go(rhs, op :: go(lhs, acc))
 
-      case UntypedExp.Cond(cond, ifTrue, ifFalse, _, ifLoc, thenLoc, elseLoc) =>
-        val ifToken   = token(ifLoc, SemanticTokenTypes.Keyword, List.empty)
-        val thenToken = token(thenLoc, SemanticTokenTypes.Keyword, List.empty)
-        val elseToken = token(elseLoc, SemanticTokenTypes.Keyword, List.empty)
+      case UntypedExp.Eq(lhs, rhs, opToken) =>
+        val op = token(opToken.loc, map, SemanticTokenTypes.Operator, List.empty)
 
-        go(ifFalse, elseToken :: go(ifTrue, thenToken :: go(ifTrue, ifToken :: acc)))
+        go(rhs, op :: go(lhs, acc))
+
+      case UntypedExp.Cond(cond, ifTrue, ifFalse, ifToken, thenToken, elseToken) =>
+        val ifSToken   = token(ifToken.loc, map, SemanticTokenTypes.Keyword, List.empty)
+        val thenSToken = token(thenToken.loc, map, SemanticTokenTypes.Keyword, List.empty)
+        val elseSToken = token(elseToken.loc, map, SemanticTokenTypes.Keyword, List.empty)
+
+        go(ifFalse, elseSToken :: go(ifTrue, thenSToken :: go(ifTrue, ifSToken :: acc)))
 
     go(exp, List.empty)
 
