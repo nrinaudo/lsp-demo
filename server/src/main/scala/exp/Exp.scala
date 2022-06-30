@@ -48,5 +48,5 @@ object Exp:
   def compile(input: String): Either[List[Error], TypedExp] = for
     tokens  <- Token.parse(input).left.map(err => List(err))
     untyped <- UntypedExp.parse(tokens).left.map(err => List(err))
-    typed   <- untyped.typeCheck
+    typed   <- untyped.typeCheck.toEither
   yield typed

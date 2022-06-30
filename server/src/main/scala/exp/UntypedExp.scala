@@ -1,6 +1,7 @@
 package exp
 
 import TypedExp.Checked
+import abstraction.{Semigroup, Validated}
 import parser.Location
 
 /** Untyped AST for our language.
@@ -46,11 +47,11 @@ enum UntypedExp:
   // -------------------------------------------------------------------------------------------------------------------
 
   /** Attempts to type-check the expression to the specified type. */
-  def as[A](expected: Type[A]): Either[List[Error.Type], Exp[A]] =
-    typeCheck.flatMap[List[Error.Type], Exp[A]] { case Checked(actual, exp) =>
+  def as[A](expected: Type[A]): Validated[List[Error.Type], Exp[A]] =
+    typeCheck.andThen[List[Error.Type], Exp[A]] { case Checked(actual, exp) =>
       Equality.check(expected, actual) match
-        case Some(Equality.Refl()) => Right(exp)
-        case _                     => Left(List(Error.Type(s"Expected $expected but found $actual", loc)))
+        case Some(Equality.Refl()) => Validated.Success(exp)
+        case _                     => Validated.Failure(List(Error.Type(s"Expected $expected but found $actual", loc)))
     }
 
   /** Attempts to type-check the expression.
@@ -58,24 +59,25 @@ enum UntypedExp:
     * Most of the time, [[as]] is probably a better choice, as it allows you to specify what kind of expression you're
     * expecting.
     */
-  def typeCheck: Either[List[Error.Type], TypedExp] =
+  def typeCheck: Validated[List[Error.Type], TypedExp] =
     this match
       // Literals.
-      case Num(value, _)  => Right(Checked(Type.Num, Exp.Num(value)))
-      case Bool(value, _) => Right(Checked(Type.Bool, Exp.Bool(value)))
+      case Num(value, _)  => Validated.Success(Checked(Type.Num, Exp.Num(value)))
+      case Bool(value, _) => Validated.Success(Checked(Type.Bool, Exp.Bool(value)))
 
       // Simple binary operations.
       case Add(lhs, rhs, _) =>
-        utils.combine(lhs.as(Type.Num), rhs.as(Type.Num))((left, right) => Checked(Type.Num, Exp.Add(left, right)))
+        (lhs.as(Type.Num), rhs.as(Type.Num)).mapN((l, r) => Checked(Type.Num, Exp.Add(l, r)))
 
       case Eq(lhs, rhs, _) =>
-        utils.combine(lhs.as(Type.Num), rhs.as(Type.Num))((left, right) => Checked(Type.Bool, Exp.Eq(left, right)))
+        (lhs.as(Type.Num), rhs.as(Type.Num)).mapN((l, r) => Checked(Type.Bool, Exp.Eq(l, r)))
 
       case Cond(cond, ifTrue, ifFalse, _, _, _) =>
         def makeExp(c: Exp[Boolean], branches: Unify) = branches match
-          case Unify.Success(tpe, l, r) => Right(Checked(tpe, Exp.Cond(c, l, r)))
+          case Unify.Success(tpe, l, r) =>
+            Validated.Success(Checked(tpe, Exp.Cond(c, l, r)))
 
-        utils.flatCombine(cond.as(Type.Bool), Unify.check(ifTrue, ifFalse))(makeExp)
+        (cond.as(Type.Bool), Unify.check(ifTrue, ifFalse)).mapN(Tuple2.apply).andThen(makeExp.tupled)
 
 // - Parsing -----------------------------------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------------------------

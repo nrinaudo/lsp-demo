@@ -4,17 +4,19 @@ import parser.Parser
 import scala.util.{Success, Try}
 
 /** Parser to turn a stream of characters into a stream of [[Token]]. */
-private val tokenParser: Parser[List[Token], Char] =
+private val tokenParser: Parser[Char, List[Token]] =
   import Parser.*
+
+  type SParser[A] = Parser[Char, A]
 
   // - Literals --------------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
-  val literal: Parser[Token, Char] =
-    val bool: Parser[Token, Char] =
+  val literal: SParser[Token] =
+    val bool =
       val value = string("true").map(_ => true) | string("false").map(_ => false)
       value.withLocation.map(Token.Bool.apply)
 
-    val num: Parser[Token, Char] =
+    val num =
       val value = digit.+.map(digits => Try(digits.mkString.toInt)).collect { case Success(num) =>
         num
       }
@@ -25,13 +27,13 @@ private val tokenParser: Parser[List[Token], Char] =
 
   // - Operators -------------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
-  val operator: Parser[Token, Char] =
+  val operator: SParser[Token] =
     val add = char('+').withLocation.map((_, loc) => Token.Add(loc))
     val eq  = char('=').withLocation.map((_, loc) => Token.Eq(loc))
 
     add | eq
 
-  val paren: Parser[Token, Char] =
+  val paren: SParser[Token] =
     val lParen = char('(').withLocation.map((_, loc) => Token.LeftParen(loc))
     val rParen = char(')').withLocation.map((_, loc) => Token.RightParen(loc))
 
@@ -39,7 +41,7 @@ private val tokenParser: Parser[List[Token], Char] =
 
   // - Keywords --------------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
-  val keyword: Parser[Token, Char] =
+  val keyword: SParser[Token] =
     val kIf   = string("if").withLocation.map((_, loc) => Token.If(loc))
     val kThen = string("then").withLocation.map((_, loc) => Token.Then(loc))
     val kElse = string("else").withLocation.map((_, loc) => Token.Else(loc))
@@ -48,15 +50,15 @@ private val tokenParser: Parser[List[Token], Char] =
 
   // - Errors ----------------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
-  val unknown: Parser[Token, Char] =
+  val unknown: SParser[Token] =
     char.filterNot { (c: Char) =>
       c.isWhitespace || c == '(' || c == ')'
     }.+.map(_.mkString).withLocation.map(Token.Unknown.apply)
 
   // - Core parsers ----------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
-  val token: Parser[Token, Char] = literal | operator | keyword | unknown
+  val token: SParser[Token] = literal | operator | keyword | unknown
 
-  val sep: Parser[List[Token], Char] = (whitespace.map(_ => List.empty) | paren.map(p => List(p))).*.map(_.flatten)
+  val sep: SParser[List[Token]] = (whitespace.map(_ => List.empty) | paren.map(p => List(p))).*.map(_.flatten)
 
   ((sep ~ token).map(_ :+ _).* ~ sep).map(_.flatten ++ _) <* end

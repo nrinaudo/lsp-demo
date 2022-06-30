@@ -147,4 +147,4 @@ private object CacheItem:
           UntypedExp.parse(tokens) match
             case Left(error) => Tokens(source, map, tokens, List(asDiagnostic(error)))
             case Right(untyped) =>
-              Valid(source, map, untyped, untyped.typeCheck.left.getOrElse(List.empty).map(asDiagnostic))
+              Valid(source, map, untyped, untyped.typeCheck.toEither.left.getOrElse(List.empty).map(asDiagnostic))

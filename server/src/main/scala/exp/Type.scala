@@ -1,5 +1,7 @@
 package exp
 
+import abstraction.Validated
+
 /* This file declares the various tools we need to interract with types at runtime. The general idea is that in order
  * to type-check something at runtime, we need to be able to manipulate types at runtime: we need values that represent
  * types. This is where `Type` comes in.
@@ -51,17 +53,17 @@ private enum Unify:
 
 private object Unify:
   /** Attempts to type check both expressions and prove that they are of the same type. */
-  def check(left: UntypedExp, right: UntypedExp): Either[List[Error.Type], Unify] =
+  def check(left: UntypedExp, right: UntypedExp): Validated[List[Error.Type], Unify] =
     def unify(lhs: TypedExp, rhs: TypedExp) = (lhs, rhs) match
       case (TypedExp.Checked(lt, le), TypedExp.Checked(rt, re)) =>
         Equality.check(lt, rt) match
-          case Some(Equality.Refl()) => Right(Unify.Success(lt, le, re))
+          case Some(Equality.Refl()) => Validated.Success(Unify.Success(lt, le, re))
           case _ =>
-            Left(
+            Validated.Failure(
               List(
                 Error.Type(s"Could not unify $lt and $rt", left.loc),
                 Error.Type(s"Could not unify $rt and $lt", right.loc)
               ): List[Error.Type] // Not entirely sure why this type ascription is necessary...
             )
 
-    utils.flatCombine(left.typeCheck, right.typeCheck)(unify)
+    (left.typeCheck, right.typeCheck).mapN(Tuple2.apply).andThen(unify.tupled)

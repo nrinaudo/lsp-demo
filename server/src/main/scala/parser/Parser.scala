@@ -2,6 +2,7 @@ package parser
 
 import scala.annotation.tailrec
 import ParseResult.{Failure, Success}
+import abstraction.*
 
 /** Minimal parser combinator implementation.
   *
@@ -13,7 +14,7 @@ import ParseResult.{Failure, Success}
   * String parser will have `Char` for `Token`, since the smallest possible amount of data you can read from a string is
   * a single character.
   */
-trait Parser[A, Token]:
+trait Parser[Token, A]:
   // - Labels ----------------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
   // Used in error messages to report what was being parsed in a more useful way than "expected c but found b".
@@ -27,12 +28,12 @@ trait Parser[A, Token]:
   //
   // That's the entire trick. If we failed to update the underlying parser's error handling, errors would be triggered
   // by the "smallest" parser to fail, and use that parser's label.
-  def mapLabel(f: String => String): Parser[A, Token] = Parser(
+  def mapLabel(f: String => String): Parser[Token, A] = Parser(
     run andThen (_.withLabel(f(label))),
     f(label)
   )
 
-  def withLabel(name: String): Parser[A, Token] = mapLabel(_ => name)
+  def withLabel(name: String): Parser[Token, A] = mapLabel(_ => name)
 
   // - Actual parsing --------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
@@ -40,29 +41,29 @@ trait Parser[A, Token]:
     *
     * The [[Tokenizer]] type class is really just meant for callers to be able to pass a [[String]].
     */
-  def run[Tokens](input: Tokens)(using Tokenizer[Tokens, Token]): ParseResult[A, Token] = run(
+  def run[Tokens](input: Tokens)(using Tokenizer[Tokens, Token]): ParseResult[Token, A] = run(
     Parser.State(input.tokenize, 0)
   )
 
   /** Internal API, where we keep track of things like offset in the initial input. */
-  protected def run(state: Parser.State[Token]): ParseResult[A, Token]
+  protected def run(state: Parser.State[Token]): ParseResult[Token, A]
 
   // - Filtering -------------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
   // Fails any parser whose result doesn't match the specified predicate.
-  def filter(f: A => Boolean): Parser[A, Token] = mapResult {
+  def filter(f: A => Boolean): Parser[Token, A] = mapResult {
     case Success(value, rest, loc) if f(value) => Success(value, rest, loc)
     case Success(value, _, loc)                => Failure(s"Unexpected $value", label, loc.offset)
     case failure: Failure                      => failure
   }
 
   // Fails any parser whose result *does* match the specified predicate.
-  def filterNot(f: A => Boolean): Parser[A, Token] = filter(f andThen (b => !b))
+  def filterNot(f: A => Boolean): Parser[Token, A] = filter(f andThen (b => !b))
 
   // Map and filter at the same time.
   //
   // This is particularly useful when attempting to restrict a sum type to one of its branches.
-  def collect[B](f: PartialFunction[A, B]): Parser[B, Token] =
+  def collect[B](f: PartialFunction[A, B]): Parser[Token, B] =
     mapResult {
       case Success(a, rest, loc) =>
         f.lift(a) match
@@ -74,12 +75,12 @@ trait Parser[A, Token]:
   // - Mapping ---------------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
   // Shouldn't be used much outside of `Parser`, but is useful for many other combinators.
-  def mapResult[B](f: ParseResult[A, Token] => ParseResult[B, Token]): Parser[B, Token] =
+  def mapResult[B](f: ParseResult[Token, A] => ParseResult[Token, B]): Parser[Token, B] =
     Parser(state => f(run(state)), label)
 
-  def map[B](f: A => B): Parser[B, Token] = mapResult(_.map(f))
+  def map[B](f: A => B): Parser[Token, B] = mapResult(_.map(f))
 
-  def flatMap[B](f: A => Parser[B, Token]): Parser[B, Token] = Parser(
+  def flatMap[B](f: A => Parser[Token, B]): Parser[Token, B] = Parser(
     state =>
       run(state) match
         case Success(a, rest, Location(offset, length)) =>
@@ -93,18 +94,18 @@ trait Parser[A, Token]:
   )
 
   /** Exposes the location of the token that was found by this parser. */
-  def withLocation: Parser[(A, Location), Token] = mapResult(_.withLocation)
+  def withLocation: Parser[Token, (A, Location)] = mapResult(_.withLocation)
 
   // - Combining parsers -----------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
 
   /** If this parse fails, attempts the other one instead. */
-  def |(other: Parser[A, Token]): Parser[A, Token] =
+  def |(other: Parser[Token, A]): Parser[Token, A] =
     val lbl = s"$label or ${other.label}"
-    Parser[A, Token](
+    Parser[Token, A](
       state =>
         run(state) match
-          case succ: Success[A, Token] => succ
+          case succ: Success[Token, A] => succ
           case _: Failure              => other.run(state)
       ,
       lbl
@@ -114,18 +115,18 @@ trait Parser[A, Token]:
     *
     * Note that this is really just a fancy `flatMap`.
     */
-  def ~[B](other: => Parser[B, Token]): Parser[(A, B), Token] =
+  def ~[B](other: => Parser[Token, B]): Parser[Token, (A, B)] =
     for
       a <- this
       b <- other
     yield (a, b)
 
-  def *>[B](other: => Parser[B, Token]): Parser[B, Token] = (this ~ other).map { case (_, b) => b }
-  def <*[B](other: => Parser[B, Token]): Parser[A, Token] = (this ~ other).map { case (a, _) => a }
+  def *>[B](other: => Parser[Token, B]): Parser[Token, B] = (this ~ other).map { case (_, b) => b }
+  def <*[B](other: => Parser[Token, B]): Parser[Token, A] = (this ~ other).map { case (a, _) => a }
 
   /** Attempts to apply this parser 0 or more times. */
-  def * : Parser[List[A], Token] =
-    def go(state: Parser.State[Token], acc: List[A], currLength: Int): ParseResult[List[A], Token] =
+  def * : Parser[Token, List[A]] =
+    def go(state: Parser.State[Token], acc: List[A], currLength: Int): ParseResult[Token, List[A]] =
       run(state) match
         case Failure(_, _, offset) => Success(acc, state.input, Location(offset, currLength))
         case Success(a, rest, Location(offset, length)) =>
@@ -137,12 +138,12 @@ trait Parser[A, Token]:
     )
 
   /** Attempts to apply this parser 1 or mor times. */
-  def + : Parser[List[A], Token] =
+  def + : Parser[Token, List[A]] =
     (this ~ this.*)
       .map((head, tail) => head :: tail)
       .withLabel(s"non empty list of $label")
 
-  def between[L, R](left: => Parser[L, Token], right: => Parser[R, Token]): Parser[A, Token] = left *> this <* right
+  def between[L, R](left: => Parser[Token, L], right: => Parser[Token, R]): Parser[Token, A] = left *> this <* right
 
 // - Companion object --------------------------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------------------------
@@ -151,15 +152,29 @@ object Parser:
   case class State[Token](input: List[Token], offset: Int)
 
   /** Helper to remove some of the boilerplate from creating new parser instances. */
-  def apply[A, Token](parser: State[Token] => ParseResult[A, Token], name: String): Parser[A, Token] =
-    new Parser[A, Token]:
+  def apply[Token, A](parser: State[Token] => ParseResult[Token, A], name: String): Parser[Token, A] =
+    new Parser[Token, A]:
       override def run(state: State[Token]) = parser(state)
       override def label                    = name
 
+  // - Abstractions ----------------------------------------------------------------------------------------------------
+  // -------------------------------------------------------------------------------------------------------------------
+  given [Token]: Monad[Parser[Token, _]] with
+    extension [A](fa: Parser[Token, A]) def map[B](f: A => B)                    = fa.map(f)
+    extension [A](a: A) def pure                                                 = Parser.pure(a)
+    extension [A, B](f: Parser[Token, A => B]) def ap                            = Parser.ap(f)
+    extension [A](fa: Parser[Token, A]) def flatMap[B](f: A => Parser[Token, B]) = fa.flatMap(f)
+
+  def pure[A, Token](a: A): Parser[Token, A] = Parser(state => Success(a, state.input, Location(0, 0)), a.toString)
+
+  def ap[A, B, Token](pf: Parser[Token, A => B]): Parser[Token, A] => Parser[Token, B] = pa =>
+    for
+      f <- pf
+      a <- pa
+    yield f(a)
+
   // - Basic parsers ------------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------
-  def pure[A, Token](a: A): Parser[A, Token] = Parser(state => Success(a, state.input, Location(0, 0)), a.toString)
-
   /** Parses a single token from the input. */
   def token[Token]: Parser[Token, Token] =
     val label = "token"
@@ -178,7 +193,7 @@ object Parser:
     token[Token].filter(_ eq t).withLabel(t.toString)
 
   /** Attempts to parse the end of the input. */
-  def end[Token: TokenShow]: Parser[Unit, Token] =
+  def end[Token: TokenShow]: Parser[Token, Unit] =
     val label = "EOF"
 
     Parser(
@@ -212,15 +227,7 @@ object Parser:
 
   def whitespace: Parser[Char, Char] = char.filter(_.isWhitespace).withLabel("whitespace")
 
-  def string(str: String): Parser[String, Char] =
-    def traverse(cs: List[Char]): Parser[List[Char], Char] = cs match
-      case head :: tail => (char(head) ~ traverse(tail)).map(_ :: _)
-      case Nil          => pure(Nil)
+  def string(str: String): Parser[Char, String] =
+    import abstraction.Traverse.given
 
-    traverse(str.toList).map(_.mkString).withLabel(str)
-
-@main def debug =
-  import Parser.*
-
-  val parser = (char('a') ~ char('b')) <* end
-  println(parser.run("ac"))
+    str.toList.traverse(char).map(_.mkString).withLabel(str)
