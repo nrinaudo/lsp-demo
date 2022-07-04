@@ -37,16 +37,53 @@ class SourceCache:
     cache.remove(uri)
   }
 
-  def change(uri: String, changes: List[TextDocumentContentChangeEvent]): List[Diagnostic] =
-    changes.headOption.map { change =>
-      val item = CacheItem(change.getText)
+  // Applies the specified list of changes to the specified cached item.
+  private def update(item: CacheItem, events: List[TextDocumentContentChangeEvent]): CacheItem =
+    // Helper class for folding over the list of events, because I find this so much better than a tuple.
+    // TODO: one way this could be improved is by keeping track of diagnostics found in the original cache item and:
+    // - deleting the ones that intersect with an event.
+    // - updating the location of the ones that are shifted by each patch event.
+    // The result would be more accurate reporting in case of an event that doesn't yield syntactically valid code.
+    case class Accumulator(source: String, map: PositionMap):
+      def patch(replacement: String, range: Range) =
+        val offset = map.toOffset(range.getStart)
+        val length = map.toOffset(range.getEnd) - offset
 
-      cache.synchronized {
-        cache.update(uri, item)
+        Accumulator(source.patch(offset, replacement, length))
+
+      def replace(source: String) = Accumulator(source)
+      def toCacheItem             = CacheItem(source)
+
+    object Accumulator:
+      def apply(source: String)  = Accumulator(source, PositionMap(source))
+      def apply(item: CacheItem) = Accumulator(item.source, item.map)
+
+    events
+      .foldLeft(Accumulator(item)) { (acc, event) =>
+        Option(event.getRange) match
+          case Some(range) => acc.patch(event.getText, range)
+          case None        => acc.replace(event.getText)
       }
+      .toCacheItem
 
-      item.diagnostics
-    }.getOrElse(List.empty)
+  def change(uri: String, changes: List[TextDocumentContentChangeEvent]): List[Diagnostic] =
+    cache.synchronized {
+      val updated: Option[CacheItem] = cache
+        .get(uri)
+        .map(item => update(item, changes))
+        // If we have no cached item for the specified URI, try to find a "replace all" event, which would allow us
+        // to get back on our feet. Otherwise, there really is nothing we can do.
+        .orElse {
+          changes.dropWhile(_.getRange != null) match
+            case head :: tail => Some(update(CacheItem(head.getText), tail))
+            case _            => None
+        }
+
+      updated.map { item =>
+        cache.put(uri, item)
+        item.diagnostics
+      }.getOrElse(List.empty)
+    }
 
   // - Diagnostics retrieval -------------------------------------------------------------------------------------------
   // -------------------------------------------------------------------------------------------------------------------

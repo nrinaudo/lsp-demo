@@ -40,7 +40,7 @@ class Server:
 
       val textDocumentSyncOptions = new TextDocumentSyncOptions()
       textDocumentSyncOptions.setOpenClose(true)
-      textDocumentSyncOptions.setChange(TextDocumentSyncKind.Full)
+      textDocumentSyncOptions.setChange(TextDocumentSyncKind.Incremental)
       capabilities.setDiagnosticProvider(new DiagnosticRegistrationOptions(false, false))
 
       capabilities.setSemanticTokensProvider(

@@ -9,6 +9,19 @@ import org.eclipse.lsp4j.Position
 class PositionMap(input: String):
   private val lines = input.split("\n").foldLeft(Accumulator.empty)(_ add _).result
 
+  def toOffset(position: Position): Int =
+    def go(remaining: List[Position], curr: Int, currentLine: Int): Int =
+      // Note that this completely fails to take into account the fact that the current line might:
+      // - not exist
+      // - contain fewer characters than position.getCharacter
+      // This is intentional - it means we got out of sync somehow and this is still our best guess.
+      if currentLine == position.getLine then curr + position.getCharacter
+      else
+        remaining match
+          case head :: tail => go(tail, curr + head.getCharacter + 1, currentLine + 1)
+          case _            => curr
+    go(lines, 0, 0)
+
   def toPosition(offset: Int): Position =
     def go(remaining: List[Position], curr: Int, last: Position): Position = remaining match
       case head :: tail =>
