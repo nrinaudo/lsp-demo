@@ -101,7 +101,7 @@ object SemanticToken:
         val thenSToken = token(thenToken.loc, map, SemanticTokenTypes.Keyword, List.empty)
         val elseSToken = token(elseToken.loc, map, SemanticTokenTypes.Keyword, List.empty)
 
-        go(ifFalse, elseSToken :: go(ifTrue, thenSToken :: go(ifTrue, ifSToken :: acc)))
+        go(ifFalse, elseSToken :: go(ifTrue, thenSToken :: go(cond, ifSToken :: acc)))
 
     go(exp, List.empty)
 
