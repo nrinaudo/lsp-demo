@@ -86,10 +86,15 @@ object UntypedExp:
 
   def parse(input: List[Token]): Either[Error.Syntax, UntypedExp] =
     expParser.run(input).toEither { (err, offset) =>
-      // Token on which the error occurred.
-      val token = input.lift(offset).getOrElse(input.last)
+      // Parsers reason in token offset, which when parsing a string maps to the index of the character in the string,
+      // but we're reasoning in Token here - `offset` maps to the index of the token where the error occured. We need
+      // to turn this into a position in characters.
 
-      // Since parsers reason in token offset, `offset`, here, is the offset of the token in which the error occurred,
-      // not of the *character* in which it occurred. We need to map from the former to the later.
-      Error.Syntax(err, token.loc)
+      // Token on which the error occurred (if any - the list of tokens might be empty)
+      val token = input.lift(offset).orElse(input.lastOption)
+
+      // Location at which the error occurred. Default to the "origin" character if the list of tokens is empty.
+      val loc = token.map(_.loc).getOrElse(Location(0, 0))
+
+      Error.Syntax(err, loc)
     }
